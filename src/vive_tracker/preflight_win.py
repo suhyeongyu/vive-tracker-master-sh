@@ -5,8 +5,16 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        pass
 
 import openvr
 import psutil
@@ -32,17 +40,28 @@ _VIVEHUB_SHORTCUT = Path(
 
 _TRACKER_STATE_LABELS = {
     "disconnected": "연결 되지 않음",
-    "lost": "손실된 트래킹",
     "syncing": "동기화중",
+    "lost": "트래킹 손실",
+    "out_of_range": "범위 벗어남",
     "ok": "연결됨",
 }
 
 _TRACKER_STATE_STYLES = {
     "disconnected": "red",
-    "lost": "yellow",
     "syncing": "cyan",
+    "lost": "yellow",
+    "out_of_range": "magenta",
     "ok": "green",
 }
+
+_TRACKER_STATE_ANSI = {
+    "disconnected": "\x1b[31m",   # red
+    "syncing": "\x1b[36m",        # cyan
+    "lost": "\x1b[33m",           # yellow
+    "out_of_range": "\x1b[35m",   # magenta
+    "ok": "\x1b[32m",             # green
+}
+_ANSI_RESET = "\x1b[0m"
 
 _TRACKING_LABELS = {
     openvr.TrackingResult_Uninitialized: "Uninitialized",
@@ -73,6 +92,25 @@ def _log(msg: str) -> None:
     print(f"[preflight] {msg}", flush=True)
 
 
+def _display_width(s: str) -> int:
+    """한글 등 동아시아 wide 문자는 2칸으로 계산."""
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
+
+
+def _pad_display(s: str, width: int) -> str:
+    return s + " " * max(0, width - _display_width(s))
+
+
+def _state_colored(state: str, width: int = 14) -> str:
+    label = _TRACKER_STATE_LABELS.get(state, state)
+    color = _TRACKER_STATE_ANSI.get(state, "")
+    padded = _pad_display(label, width)
+    if color:
+        return f"{color}{padded}{_ANSI_RESET}"
+    return padded
+
+
 def _steamvr_running() -> bool:
     targets = {n.lower() for n in _STEAMVR_PROCESS_NAMES}
     for proc in psutil.process_iter(attrs=["name"]):
@@ -98,7 +136,7 @@ def _run_powershell_json(command: str, step_label: str) -> list[dict]:
     )
     if result.returncode != 0:
         raise PreflightError(
-            f"{step_label} PowerShell 호출 실패 — {command.split('|', 1)[0].strip()}\n"
+            f"{step_label} PowerShell 호출 실패 - {command.split('|', 1)[0].strip()}\n"
             f"      stderr: {result.stderr.strip()}"
         )
     stdout = result.stdout.strip()
@@ -131,7 +169,7 @@ def _step1_check_firewall() -> None:
 
     connections = _query_connection_profiles()
     if not connections:
-        _log("      연결된 네트워크 어댑터 없음 — 방화벽 검사 건너뜀")
+        _log("      연결된 네트워크 어댑터 없음 - 방화벽 검사 건너뜀")
         _log("      경고: 네트워크가 끊긴 상태입니다. DDS 통신은 실제 네트워크 복구 후 가능.")
         return
 
@@ -156,24 +194,24 @@ def _step1_check_firewall() -> None:
 
     if enabled:
         lines = [
-            "[1/5] Windows 방화벽이 켜져 있습니다 — DDS 통신이 차단될 수 있어 preflight를 종료합니다."
+            "[1/5] Windows 방화벽이 켜져 있습니다 - DDS 통신이 차단될 수 있어 preflight를 종료합니다."
         ]
         for p in enabled:
             adapters = ", ".join(active_fw_names[p["Name"]])
-            lines.append(f"      · {p['Name']} 프로파일 (어댑터: {adapters})")
+            lines.append(f"      - {p['Name']} 프로파일 (어댑터: {adapters})")
         lines.append("      아래 중 하나로 조치 후 다시 실행하세요:")
         lines.append(
-            "        · 관리자 PowerShell: Set-NetFirewallProfile -Profile "
+            "        - 관리자 PowerShell: Set-NetFirewallProfile -Profile "
             + ",".join(p["Name"] for p in enabled)
             + " -Enabled False"
         )
-        lines.append("        · 또는 제어판 > Windows Defender 방화벽에서 해당 프로파일 해제")
+        lines.append("        - 또는 제어판 > Windows Defender 방화벽에서 해당 프로파일 해제")
         lines.append(
-            "        · 또는 CycloneDDS UDP 포트(7400-7500 범위)에 인바운드/아웃바운드 허용 규칙 추가"
+            "        - 또는 CycloneDDS UDP 포트(7400-7500 범위)에 인바운드/아웃바운드 허용 규칙 추가"
         )
         raise PreflightError("\n".join(lines))
 
-    _log("      활성 프로파일 모두 off — 통과")
+    _log("      활성 프로파일 모두 off - 통과")
 
 
 def _step2_start_steamvr(start_steamvr: bool) -> None:
@@ -191,7 +229,7 @@ def _step2_start_steamvr(start_steamvr: bool) -> None:
     vrstartup = _find_vrstartup()
     if vrstartup is None:
         raise PreflightError(
-            "[2/5] SteamVR 설치를 찾을 수 없음 — Steam에서 SteamVR 설치를 확인하세요.\n"
+            "[2/5] SteamVR 설치를 찾을 수 없음 - Steam에서 SteamVR 설치를 확인하세요.\n"
             f"      탐색 경로:\n        "
             + "\n        ".join(str(p) for p in _STEAMVR_INSTALL_CANDIDATES)
         )
@@ -243,7 +281,7 @@ def _vivehub_running() -> bool:
 
 def _launch_vivehub() -> None:
     if _vivehub_running():
-        _log("      ViveHub 이미 실행 중 — 재실행 생략")
+        _log("      ViveHub 이미 실행 중 - 재실행 생략")
         return
     if not _VIVEHUB_SHORTCUT.is_file():
         _log(f"      ViveHub 바로가기를 찾을 수 없음: {_VIVEHUB_SHORTCUT}")
@@ -264,10 +302,10 @@ def _classify_tracker(pose, device_class: int) -> str:
     result = int(pose.eTrackingResult)
     if result in _MAP_PENDING_RESULTS:
         return "syncing"
-    if not pose.bPoseIsValid:
-        return "lost"
     if result == openvr.TrackingResult_Running_OK:
-        return "ok"
+        return "ok" if pose.bPoseIsValid else "lost"
+    if result == openvr.TrackingResult_Running_OutOfRange:
+        return "out_of_range"
     return "lost"
 
 
@@ -300,17 +338,25 @@ def _build_status_table(vr_system, elapsed: float, total: float) -> tuple[Table,
             str(idx),
             f"[{style}]{_TRACKER_STATE_LABELS[state]}[/{style}]",
             result_label,
-            "✓" if pose.bPoseIsValid else "✗",
+            "OK" if pose.bPoseIsValid else "FAIL",
         )
 
     if not indices:
-        table.add_row("—", "—", "[red]연결 되지 않음[/red]", "—", "—")
+        table.add_row("-", "-", "[red]연결 되지 않음[/red]", "-", "-")
 
     return table, states
 
 
-def _step4_monitor_trackers(vr_system, total_timeout: float, initial_scan_timeout: float = 1.0) -> None:
-    _log(f"[4/5] Vive Tracker 상태 모니터링 (최대 {int(total_timeout)}s)...")
+def _step4_monitor_trackers(
+    vr_system,
+    total_timeout: float,
+    num_trackers: int,
+    initial_scan_timeout: float = 1.0,
+) -> None:
+    _log(
+        f"[4/5] Vive Tracker 상태 모니터링 "
+        f"(기대 {num_trackers}개, 최대 {int(total_timeout)}s)..."
+    )
 
     scan_start = time.monotonic()
     initial_indices: list[int] = []
@@ -321,21 +367,65 @@ def _step4_monitor_trackers(vr_system, total_timeout: float, initial_scan_timeou
         time.sleep(0.2)
 
     if not initial_indices:
-        _log("      초기 스캔에서 트래커 미검출 — ViveHub 자동 실행 시도")
+        _log("      초기 스캔에서 트래커 미검출 - ViveHub 자동 실행 시도")
         _launch_vivehub()
     else:
         _log(f"      초기 스캔: 트래커 {len(initial_indices)}개 감지 (device_index={initial_indices})")
 
     start = time.monotonic()
-    console = Console()
-    with Live(console=console, refresh_per_second=4, transient=False) as live:
+    is_tty = sys.stdout.isatty()
+
+    if is_tty:
+        console = Console()
+        with Live(console=console, refresh_per_second=4, transient=False) as live:
+            while time.monotonic() - start < total_timeout:
+                elapsed = time.monotonic() - start
+                table, states = _build_status_table(vr_system, elapsed, total_timeout)
+                live.update(table)
+
+                if len(states) >= num_trackers and all(s == "ok" for s in states):
+                    _log(
+                        f"      {num_trackers}개 트래커 모두 '연결됨' - "
+                        f"조기 통과 (경과 {elapsed:.1f}s)"
+                    )
+                    return
+
+                time.sleep(0.25)
+    else:
+        # non-TTY (ros2 launch 캡처): 커서 제어가 stdout prefix에 깨져 in-place 렌더 불가.
+        # append-only 전략: 매초 현재 상태를 한 줄씩 계속 출력 + 상태 변화 즉시 출력.
+        col_width = 14
+        heartbeat_interval = 1.0
+        last_log = -999.0
+        prev_states: list[str] | None = None
+        header_logged = False
         while time.monotonic() - start < total_timeout:
             elapsed = time.monotonic() - start
-            table, states = _build_status_table(vr_system, elapsed, total_timeout)
-            live.update(table)
+            _, states = _build_status_table(vr_system, elapsed, total_timeout)
 
-            if states and all(s == "ok" for s in states):
-                _log(f"      모든 트래커 '연결됨' — 조기 통과 (경과 {elapsed:.1f}s)")
+            if not header_logged and states:
+                header = " | ".join(
+                    _pad_display(f"tracker_{i}", col_width) for i in range(len(states))
+                )
+                _log(f"      {'[time      ]':<14} | {header}")
+                _log(f"      {'-' * 14}-+-{'-+-'.join(['-' * col_width] * len(states))}")
+                header_logged = True
+
+            state_changed = states != prev_states
+            if state_changed or elapsed - last_log >= heartbeat_interval:
+                if states:
+                    row = " | ".join(_state_colored(s, col_width) for s in states)
+                    _log(f"      [{elapsed:5.1f}s/{int(total_timeout):>3}s] | {row}")
+                else:
+                    _log(f"      [{elapsed:5.1f}s/{int(total_timeout):>3}s] | 트래커 미검출")
+                last_log = elapsed
+                prev_states = list(states)
+
+            if len(states) >= num_trackers and all(s == "ok" for s in states):
+                _log(
+                    f"      {num_trackers}개 트래커 모두 '연결됨' - "
+                    f"조기 통과 (경과 {elapsed:.1f}s)"
+                )
                 return
 
             time.sleep(0.25)
@@ -343,67 +433,87 @@ def _step4_monitor_trackers(vr_system, total_timeout: float, initial_scan_timeou
     indices = _find_trackers(vr_system)
     if not indices:
         raise PreflightError(
-            f"[4/5] {int(total_timeout)}s 동안 Vive Tracker 미검출 — 다음 항목을 확인하세요:\n"
-            "        · USB 동글이 PC에 연결되어 있는가\n"
-            "        · 트래커가 켜져 있고 페어링 LED(파란색)가 안정적인가\n"
-            "        · 트래커 배터리가 충전되어 있는가\n"
-            "        · ViveHub 창에서 페어링 상태를 확인하세요"
+            f"[4/5] {int(total_timeout)}s 동안 Vive Tracker 미검출 "
+            f"(기대 {num_trackers}개) - 다음 항목을 확인하세요:\n"
+            "        - USB 동글이 PC에 연결되어 있는가\n"
+            "        - 트래커가 켜져 있고 페어링 LED(파란색)가 안정적인가\n"
+            "        - 트래커 배터리가 충전되어 있는가\n"
+            "        - ViveHub 창에서 페어링 상태를 확인하세요"
         )
 
     poses = vr_system.getDeviceToAbsoluteTrackingPose(
         openvr.TrackingUniverseStanding, 0, openvr.k_unMaxTrackedDeviceCount
     )
-    lines = [f"[4/5] {int(total_timeout)}s 내에 모든 트래커가 '연결됨' 상태에 도달하지 못했습니다."]
+    if len(indices) < num_trackers:
+        header = (
+            f"[4/5] {int(total_timeout)}s 내에 {num_trackers}개 트래커가 연결되지 못했습니다 "
+            f"(현재 {len(indices)}개 검출)."
+        )
+    else:
+        header = f"[4/5] {int(total_timeout)}s 내에 모든 트래커가 '연결됨' 상태에 도달하지 못했습니다."
+    lines = [header]
     for i, idx in enumerate(indices):
         pose = poses[idx]
         device_class = vr_system.getTrackedDeviceClass(idx)
         state = _classify_tracker(pose, device_class)
         result_label = _TRACKING_LABELS.get(int(pose.eTrackingResult), str(int(pose.eTrackingResult)))
         lines.append(
-            f"        · tracker_{i} (device={idx}): {_TRACKER_STATE_LABELS[state]} / {result_label}"
+            f"        - tracker_{i} (device={idx}): {_TRACKER_STATE_LABELS[state]} / {result_label}"
         )
         if state == "syncing":
-            lines.append("          → ViveHub에서 환경 스캔/맵 생성 완료 필요")
+            lines.append("          -> ViveHub에서 환경 스캔/맵 생성 완료 필요")
+        elif state == "out_of_range":
+            lines.append("          -> 카메라 시야에 특징점 부족 - 위치 이동 필요")
         elif state == "lost":
-            lines.append("          → 카메라 시야를 벗어났거나 맵 재생성 필요")
+            lines.append("          -> 트래킹 실패 - 맵 재생성 또는 환경 특징점 확보 필요")
         elif state == "disconnected":
-            lines.append("          → 동글/페어링/배터리 확인")
+            lines.append("          -> 동글/페어링/배터리 확인")
     raise PreflightError("\n".join(lines))
 
 
 def _step_network_reachability() -> None:
     """Warn-only: ping cyclonedds.xml peers. Ubuntu may still be booting,
-    so failure here is informational — it must never block launch."""
+    so failure here is informational - it must never block launch."""
     _log("[4.5/5] Ubuntu peer 네트워크 도달성 확인...")
 
-    import sys as _sys
-    repo_root = str(Path(__file__).resolve().parent.parent.parent)
-    if repo_root not in _sys.path:
-        _sys.path.insert(0, repo_root)
-
     try:
-        from scripts.summary_dashboard import _ping, _read_cyclonedds_ips
+        from summary_dashboard import (
+            _get_local_ip_fallback,
+            _get_wifi_info,
+            _ping,
+            _read_cyclonedds_ips,
+        )
     except ImportError as e:
-        _log(f"      summary_dashboard 로드 실패 ({e}) — 네트워크 체크 건너뜀")
+        _log(f"      summary_dashboard 로드 실패 ({e}) - 네트워크 체크 건너뜀")
         return
 
-    _local_ip, peers, _cdds_path = _read_cyclonedds_ips()
+    local_ip, peers, _ = _read_cyclonedds_ips()
+    if not local_ip:
+        local_ip = _get_local_ip_fallback()
+
+    _log(f"      내 IP: {local_ip}")
+    _log(f"      Wi-Fi: {_get_wifi_info()}")
+
     if not peers:
-        _log("      cyclonedds.xml에 Peer 미정의 — 네트워크 체크 건너뜀")
+        _log("      cyclonedds.xml에 Peer 미정의 - 네트워크 체크 건너뜀")
         return
 
-    unreachable = [p for p in peers if not _ping(p)]
-    if unreachable:
-        _log(f"      경고: 다음 피어 도달 불가: {unreachable}")
-        _log("        · 같은 WiFi 네트워크 확인")
-        _log("        · Ubuntu 쪽 IP 실제 값 확인")
-        _log("        · ICMP(ping) 차단 여부 확인")
-        _log("        · Ubuntu가 아직 부팅 중이면 정상 — 계속 진행")
-    else:
-        _log(f"      모든 피어 도달 가능: {peers}")
+    any_unreachable = False
+    for peer in peers:
+        reachable = _ping(peer)
+        if reachable:
+            label = _TRACKER_STATE_ANSI["ok"] + "도달 가능" + _ANSI_RESET
+        else:
+            label = _TRACKER_STATE_ANSI["disconnected"] + "도달 불가" + _ANSI_RESET
+            any_unreachable = True
+        _log(f"      peer {peer}: {label}")
+
+    if any_unreachable:
+        _log("        (Ubuntu가 부팅 중이거나 ICMP 차단이면 정상 - launch 계속 진행)")
 
 
 def run_preflight(
+    num_trackers: int,
     steamvr_timeout: float = 60.0,
     tracker_monitor_timeout: float = 30.0,
     start_steamvr: bool = True,
@@ -418,7 +528,7 @@ def run_preflight(
         _step1_check_firewall()
         _step2_start_steamvr(start_steamvr)
         vr_system = _step3_wait_openvr(steamvr_timeout)
-        _step4_monitor_trackers(vr_system, tracker_monitor_timeout)
+        _step4_monitor_trackers(vr_system, tracker_monitor_timeout, num_trackers)
         _step_network_reachability()
     finally:
         if vr_system is not None:
@@ -427,12 +537,39 @@ def run_preflight(
                 openvr.shutdown()
             except Exception as e:
                 _log(f"      openvr.shutdown 경고 (무시): {e}")
-    _log("preflight 통과 — ROS 2 노드 기동 진행")
+    _log("preflight 통과 - ROS 2 노드 기동 진행")
 
 
 def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Vive tracker Windows preflight")
+    parser.add_argument(
+        "--num-trackers",
+        type=int,
+        default=1,
+        help="기대 트래커 개수 (이만큼 모두 'ok'가 되어야 통과)",
+    )
+    parser.add_argument(
+        "--steamvr-timeout",
+        type=float,
+        default=60.0,
+        help="SteamVR 런타임 대기 최대 시간 (초)",
+    )
+    parser.add_argument(
+        "--tracker-monitor-timeout",
+        type=float,
+        default=30.0,
+        help="트래커 상태 모니터링 최대 시간 (초)",
+    )
+    args = parser.parse_args()
+
     try:
-        run_preflight()
+        run_preflight(
+            num_trackers=args.num_trackers,
+            steamvr_timeout=args.steamvr_timeout,
+            tracker_monitor_timeout=args.tracker_monitor_timeout,
+        )
         return 0
     except PreflightError as e:
         print(f"\n[preflight] 실패:\n{e}", flush=True)
@@ -440,5 +577,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    import sys
     sys.exit(main())

@@ -2,6 +2,7 @@ vive_tracker_node:
   ros__parameters:
     publish_rate: 100.0
     frame_id: "openvr"
+    num_trackers: 2
 
 mock_tracker_node:
   ros__parameters:

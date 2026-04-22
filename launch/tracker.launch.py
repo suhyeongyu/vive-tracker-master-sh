@@ -1,4 +1,4 @@
-"""Launch preflight → vive tracker node chain (Windows).
+"""Launch preflight -> vive tracker node chain (Windows).
 
 Preflight validates firewall / SteamVR / trackers / DDS peer reachability.
 Only if preflight exits 0, vive_tracker_node starts publishing. Visualizer
@@ -7,9 +7,18 @@ runs on the Ubuntu side, not here.
 
 import os
 
+import yaml
+
 from launch import LaunchDescription
 from launch.actions import ExecuteProcess, LogInfo, RegisterEventHandler
 from launch.event_handlers import OnProcessExit
+
+
+def _read_num_trackers(config_path: str) -> int:
+    """vive_tracker_node의 num_trackers 파라미터를 yaml에서 추출."""
+    with open(config_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    return int(data["vive_tracker_node"]["ros__parameters"]["num_trackers"])
 
 
 def generate_launch_description():
@@ -18,9 +27,15 @@ def generate_launch_description():
         "config",
         "tracker_params.yaml",
     )
+    num_trackers = _read_num_trackers(config)
 
     preflight = ExecuteProcess(
-        cmd=["python", "src/vive_tracker/preflight_win.py"],
+        cmd=[
+            "python",
+            "src/vive_tracker/preflight_win.py",
+            "--num-trackers",
+            str(num_trackers),
+        ],
         name="preflight",
         output="screen",
     )
@@ -42,7 +57,7 @@ def generate_launch_description():
             return [tracker]
         return [
             LogInfo(
-                msg=f"[launch] preflight 실패 (exit {event.returncode}) — tracker 미기동"
+                msg=f"[launch] preflight 실패 (exit {event.returncode}) - tracker 미기동"
             )
         ]
 

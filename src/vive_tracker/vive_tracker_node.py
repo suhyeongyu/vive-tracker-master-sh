@@ -1,4 +1,4 @@
-"""Vive Tracker ROS 2 node — publishes 6D pose via OpenVR.
+"""Vive Tracker ROS 2 node - publishes 6D pose via OpenVR.
 
 Reads Vive Ultimate Tracker poses from SteamVR via OpenVR API
 and publishes each tracker as PoseStamped.
@@ -24,9 +24,11 @@ class ViveTrackerNode(Node):
 
         self.declare_parameter("publish_rate", 100.0)
         self.declare_parameter("frame_id", "openvr")
+        self.declare_parameter("num_trackers", 1)
 
         rate = self.get_parameter("publish_rate").value
         self.frame_id = self.get_parameter("frame_id").value
+        self.num_trackers = self.get_parameter("num_trackers").value
 
         try:
             self.vr_system = openvr.init(openvr.VRApplication_Other)
@@ -39,7 +41,9 @@ class ViveTrackerNode(Node):
         self._next_tracker_id = 0
 
         self.timer = self.create_timer(1.0 / rate, self.timer_callback)
-        self.get_logger().info(f"ViveTracker node started at {rate}Hz")
+        self.get_logger().info(
+            f"ViveTracker node started at {rate}Hz (expecting {self.num_trackers} tracker(s))"
+        )
 
     def _get_or_create_publisher(self, device_index: int):
         if device_index not in self._tracker_map:

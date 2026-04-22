@@ -1,4 +1,4 @@
-"""Tracker visualizer node — 3D visualization of tracker poses via viser.
+"""Tracker visualizer node - 3D visualization of tracker poses via viser.
 
 Subscribes to /vive/tracker_*/pose topics and renders each tracker
 as a 3D frame with Hz label in a web-based viewer (localhost:8080).
