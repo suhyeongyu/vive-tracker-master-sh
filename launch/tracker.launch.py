@@ -1,17 +1,34 @@
 """Launch preflight -> vive tracker node chain (Windows).
 
 Preflight validates firewall / SteamVR / trackers / DDS peer reachability.
-Only if preflight exits 0, vive_tracker_node starts publishing. Visualizer
-runs on the Ubuntu side, not here.
+Only if preflight exits 0, vive_tracker_node starts publishing.
+
+Launch arguments:
+  record:=true|false     Enable rosbag recording of all topics (default: false)
+  bag_output:=<path>     Output directory for rosbag
+                         (default: rosbags/YYYYMMDD_HHMMSS)
+
+Examples:
+  ros2 launch launch/tracker.launch.py
+  ros2 launch launch/tracker.launch.py record:=true
+  ros2 launch launch/tracker.launch.py record:=true bag_output:=my_capture
 """
 
 import os
+from datetime import datetime
 
 import yaml
 
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, LogInfo, RegisterEventHandler
+from launch.actions import (
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    LogInfo,
+    RegisterEventHandler,
+)
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
+from launch.substitutions import LaunchConfiguration
 
 
 def _read_num_trackers(config_path: str) -> int:
@@ -28,6 +45,18 @@ def generate_launch_description():
         "tracker_params.yaml",
     )
     num_trackers = _read_num_trackers(config)
+
+    record_arg = DeclareLaunchArgument(
+        "record",
+        default_value="false",
+        description="Set to 'true' to record all topics with ros2 bag",
+    )
+    default_bag_output = f"rosbags/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    bag_output_arg = DeclareLaunchArgument(
+        "bag_output",
+        default_value=default_bag_output,
+        description="Output directory for rosbag (used only when record:=true)",
+    )
 
     preflight = ExecuteProcess(
         cmd=[
@@ -52,9 +81,23 @@ def generate_launch_description():
         output="screen",
     )
 
+    recorder = ExecuteProcess(
+        cmd=[
+            "ros2",
+            "bag",
+            "record",
+            "-a",
+            "-o",
+            LaunchConfiguration("bag_output"),
+        ],
+        name="rosbag_recorder",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("record")),
+    )
+
     def _on_preflight_exit(event, context):
         if event.returncode == 0:
-            return [tracker]
+            return [tracker, recorder]
         return [
             LogInfo(
                 msg=f"[launch] preflight 실패 (exit {event.returncode}) - tracker 미기동"
@@ -63,6 +106,8 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
+            record_arg,
+            bag_output_arg,
             preflight,
             RegisterEventHandler(
                 OnProcessExit(
