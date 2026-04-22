@@ -1,0 +1,17 @@
+vive_tracker_node:
+  ros__parameters:
+    publish_rate: 100.0
+    frame_id: "openvr"
+
+mock_tracker_node:
+  ros__parameters:
+    publish_rate: 100.0
+    num_trackers: 2
+    pattern: "circular"
+    radius: 0.5
+    frame_id: "openvr"
+
+tracker_visualizer_node:
+  ros__parameters:
+    num_trackers: 2
+    viser_port: 8080

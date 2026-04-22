@@ -1,0 +1,48 @@
+[workspace]
+name = "vive-tracker-test"
+version = "0.1.0"
+channels = ["robostack-humble", "conda-forge"]
+platforms = ["linux-64", "win-64"]
+
+[dependencies]
+ros-humble-ros-base = "*"
+ros-humble-geometry-msgs = "*"
+ros-humble-rclpy = "*"
+ros-humble-cyclonedds = "*"
+
+colcon-common-extensions = "*"
+cmake = "<4"
+ninja = "*"
+python = ">=3.10"
+numpy = "*"
+scipy = "*"
+viser = "*"
+
+[target.linux-64.dependencies]
+compilers = "*"
+
+[target.win-64.dependencies]
+vs2022_win-64 = "*"
+
+[tasks]
+mock = "python src/vive_tracker/mock_tracker_node.py"
+visualize = "python src/vive_tracker/tracker_visualizer_node.py"
+track = "python src/vive_tracker/vive_tracker_node.py"
+launch-mock = "ros2 launch launch/mock.launch.py"
+launch-track = "ros2 launch launch/tracker.launch.py"
+
+[pypi-dependencies]
+openvr = ">=2.12.1401, <3"
+matplotlib = "*"
+
+[activation]
+env = { ROS_DOMAIN_ID="25", RMW_IMPLEMENTATION="" }
+
+# Windows 환경에서 vive tracker ros node 를 실행할 때
+# Unicast 로 Linux PC 와 통신을 하기 위해 cyclonedds 설정
+# cyclonedds 의 localhost ip, peer ip 를 알맞게 설정해야 함
+[feature.win.activation]
+env = { RMW_IMPLEMENTATION = "rmw_cyclonedds_cpp", CYCLONEDDS_URI = "C:/Users/user/Desktop/vive-tracker-master/vive-tracker-master-sh/cyclonedds.xml" }
+
+[environments]
+win = ["win"]
