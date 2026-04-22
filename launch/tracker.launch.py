@@ -43,7 +43,7 @@ def generate_launch_description():
     tracker = ExecuteProcess(
         cmd=[
             "python",
-            "src/vive_tracker/vive_tracker_node.py",
+            "src/vive_tracker/vive_tracker_node2.py",
             "--ros-args",
             "--params-file",
             config,

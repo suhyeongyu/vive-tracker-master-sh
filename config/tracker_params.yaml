@@ -1,3 +1,11 @@
+vive_tracker_node2:
+  ros__parameters:
+    publish_rate: 100.0
+    battery_refresh_interval: 1.0
+    rescan_interval: 2.0
+    frame_id: "openvr"
+    num_trackers: 2
+    
 vive_tracker_node:
   ros__parameters:
     publish_rate: 100.0
