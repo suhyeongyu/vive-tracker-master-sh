@@ -43,23 +43,6 @@ _TRACKING_RESULT_LABELS = {
     openvr.TrackingResult_Fallback_RotationOnly: "Fallback_RotationOnly",
 }
 
-_STATE_LABELS = {
-    "disconnected": "연결 되지 않음",
-    "syncing": "동기화중",
-    "lost": "트래킹 손실",
-    "out_of_range": "범위 벗어남",
-    "ok": "연결됨",
-}
-
-_STATE_LEVEL = {
-    "disconnected": DiagnosticStatus.ERROR,
-    "lost": DiagnosticStatus.ERROR,
-    "syncing": DiagnosticStatus.WARN,
-    "out_of_range": DiagnosticStatus.WARN,
-    "ok": DiagnosticStatus.OK,
-}
-
-
 def _classify_tracker(pose) -> str:
     """Classify tracker state. Device class is known GenericTracker (cached)."""
     if not pose.bDeviceIsConnected:
@@ -251,6 +234,7 @@ class ViveTrackerNode(Node):
     def _tick(self):
         """100Hz: publish Odometry + PoseStamped + DiagnosticStatus + BatteryState."""
         now_mono = time.monotonic()
+
         if now_mono - self._last_rescan > self._rescan_interval:
             self._rescan_devices()
             self._last_rescan = now_mono
@@ -301,8 +285,6 @@ class ViveTrackerNode(Node):
             diag = DiagnosticStatus()
             diag.name = info.name
             diag.hardware_id = info.serial
-            diag.level = _STATE_LEVEL.get(state, DiagnosticStatus.ERROR)
-            diag.message = _STATE_LABELS.get(state, state)
             diag.values = [
                 KeyValue(
                     key="tracking_result",

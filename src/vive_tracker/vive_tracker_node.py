@@ -73,9 +73,6 @@ class ViveTrackerNode(Node):
                 continue
 
             pose = poses[i]
-            if not pose.bPoseIsValid:
-                continue
-
             pub, _ = self._get_or_create_publisher(i)
 
             m = np.eye(4)
